@@ -1,5 +1,9 @@
 #!/bin/sh
 
+# Make CI exit fairly quickly for testing. XXX XXX XXX
+sleep 5
+exit 0
+
 set -e
 
 INST_DIR=`pwd`/inst
