@@ -47,6 +47,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/SymbolRewriter.h"
+#include "llvm/Transforms/YkFuncTerm/YkFuncTerm.h"
 #include <cassert>
 #include <string>
 
@@ -1045,6 +1046,8 @@ bool TargetPassConfig::addISelPasses() {
   PM->add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
   addIRPasses();
   addCodeGenPrepare();
+  // add pass that splits up block after calls.
+  addPass(createYKFuncTermPass());
   addPassesToHandleExceptions();
   addISelPrepare();
 

@@ -1310,6 +1310,9 @@ static void salvageDebugInfoFromEmptyBlock(const TargetInstrInfo *TII,
 }
 
 bool BranchFolder::OptimizeBlock(MachineBasicBlock *MBB) {
+  // Disable merging of fallthrough blocks to preserve the mapping from LLVM IR
+  // to machine blocks.
+  return false;
   bool MadeChange = false;
   MachineFunction &MF = *MBB->getParent();
 ReoptimizeBlock:
