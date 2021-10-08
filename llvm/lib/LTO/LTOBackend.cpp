@@ -369,6 +369,7 @@ static void runOldPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
     PMB.populateThinLTOPassManager(passes);
   else
     PMB.populateLTOPassManager(passes);
+  // add CP pass here?
   passes.run(Mod);
 }
 
