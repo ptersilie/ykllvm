@@ -204,12 +204,26 @@ void createControlPoint(Module &Mod, Function *F, std::vector<Value *> LiveVars,
     TypeParams.push_back(LV->getType());
   }
   FunctionType *FType = FunctionType::get(
-      Type::getVoidTy(Context), {YkCtrlPointStruct->getPointerTo()}, false);
+      Type::getVoidTy(Context), {YkCtrlPointStruct->getPointerTo(), Type::getInt8PtrTy(Context), Type::getInt64Ty(Context)}, false);
+
+  // XXX use PtrSizedInteger
   Value *JITActionPtr =
-      Builder.CreateIntToPtr(JITAction, Type::getInt8PtrTy(Context));
-  Value *CastTrace = Builder.CreateBitCast(JITActionPtr, FType->getPointerTo());
+      Builder.CreateIntToPtr(JITAction, Type::getInt64PtrTy(Context));
+  // Extract trace pointer.
+  Value *TraceValPtr = Builder.CreateGEP(Type::getInt64Ty(Context), JITActionPtr, Builder.getInt32(0));
+  Value *TraceVal = Builder.CreateLoad(Type::getInt64Ty(Context), TraceValPtr);
+  Value *TracePtr = Builder.CreateIntToPtr(TraceVal, Type::getInt8PtrTy(Context));
+  // Extract stackmap pointer.
+  Value *StackMapValPtr = Builder.CreateGEP(Type::getInt64Ty(Context), JITActionPtr, Builder.getInt32(1));
+  Value *StackMapVal = Builder.CreateLoad(Type::getInt64Ty(Context), StackMapValPtr);
+  Value *StackMapPtr = Builder.CreateIntToPtr(StackMapVal, Type::getInt8PtrTy(Context));
+  // Extract stackmap size.
+  Value *StackMapSizePtr = Builder.CreateGEP(Type::getInt64Ty(Context), JITActionPtr, Builder.getInt32(2));
+  Value *StackMapSize = Builder.CreateLoad(Type::getInt64Ty(Context), StackMapSizePtr);
+
+  Value *CastTrace = Builder.CreateBitCast(TracePtr, FType->getPointerTo());
   createJITStatePrint(Builder, &Mod, "enter-jit-code");
-  CallInst *CTResult = Builder.CreateCall(FType, CastTrace, F->getArg(1));
+  CallInst *CTResult = Builder.CreateCall(FType, CastTrace, {F->getArg(1), StackMapPtr, StackMapSize});
   createJITStatePrint(Builder, &Mod, "exit-jit-code");
   CTResult->setTailCall(true);
   Builder.CreateBr(BBExecuteTrace);
