@@ -9130,29 +9130,17 @@ void SelectionDAGBuilder::visitStackmap(const CallInst &CI) {
   Chain = DAG.getCALLSEQ_START(getRoot(), 0, 0, DL);
   InFlag = Chain.getValue(1);
 
-  // Add the <id> and <numBytes> constants.
-  SDValue IDVal = getValue(CI.getOperand(PatchPointOpers::IDPos));
-  Ops.push_back(DAG.getTargetConstant(
-                  cast<ConstantSDNode>(IDVal)->getZExtValue(), DL, MVT::i64));
-  SDValue NBytesVal = getValue(CI.getOperand(PatchPointOpers::NBytesPos));
-  Ops.push_back(DAG.getTargetConstant(
-                  cast<ConstantSDNode>(NBytesVal)->getZExtValue(), DL,
-                  MVT::i32));
-
-  // Push live variables for the stack map.
-  addStackMapLiveVars(CI, 2, DL, Ops, *this);
-
-  // We are not pushing any register mask info here on the operands list,
-  // because the stackmap doesn't clobber anything.
-
-  // Push the chain and the glue flag.
-  Ops.push_back(Chain);
-  Ops.push_back(InFlag);
+  // Add the STACKMAP operands, starting with DAG house-keeping.
+  std::vector<SDValue> Operands;
+  Operands.push_back(Chain);
+  Operands.push_back(InFlag);
+  // Add the <id>, <numShadowBytes> and live variables arguments.
+  for (unsigned I = 0; I < CI.arg_size(); I++)
+    Operands.push_back(getValue(CI.getArgOperand(I)));
 
   // Create the STACKMAP node.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
-  SDNode *SM = DAG.getMachineNode(TargetOpcode::STACKMAP, DL, NodeTys, Ops);
-  Chain = SDValue(SM, 0);
+  Chain = DAG.getNode(ISD::STACKMAP, DL, NodeTys, Operands);
   InFlag = Chain.getValue(1);
 
   Chain = DAG.getCALLSEQ_END(Chain, NullPtr, NullPtr, InFlag, DL);

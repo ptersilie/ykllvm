@@ -486,6 +486,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::SDID:                                                              \
     return #NAME;
 #include "llvm/IR/VPIntrinsics.def"
+  case ISD::STACKMAP:
+    return "stackmap";
   }
 }
 
