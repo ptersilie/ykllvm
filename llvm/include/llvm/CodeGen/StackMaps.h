@@ -280,6 +280,11 @@ public:
         : Reg(Reg), DwarfRegNum(DwarfRegNum), Size(Size) {}
   };
 
+  struct CSR {
+    unsigned Reg = 0;
+    int64_t Offset = 0;
+  };
+
   // OpTypes are used to encode information about the following logical
   // operand (which may consist of several MachineOperands) for the
   // OpParser.
@@ -300,6 +305,7 @@ public:
   using LocationVec = SmallVector<Location, 8>;
   using LiveOutVec = SmallVector<LiveOutReg, 8>;
   using ConstantPool = MapVector<uint64_t, uint64_t>;
+  using CSRVec = SmallVector<CSR, 8>;
 
   struct FunctionInfo {
     uint64_t StackSize = 0;
@@ -357,6 +363,8 @@ private:
   CallsiteInfoList CSInfos;
   ConstantPool ConstPool;
   FnInfoMap FnInfos;
+  bool HasFramePointer;
+  CSRVec CSRInfo;
 
   MachineInstr::const_mop_iterator
   parseOperand(MachineInstr::const_mop_iterator MOI,
@@ -402,6 +410,9 @@ private:
 
   /// Emit the callsite info for each stackmap/patchpoint intrinsic call.
   void emitCallsiteEntries(MCStreamer &OS);
+
+  /// Emit information about the function prologue.
+  void emitCSRInfo(MCStreamer &OS);
 
   void print(raw_ostream &OS);
   void debug() { print(dbgs()); }

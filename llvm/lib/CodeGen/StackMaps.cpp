@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -509,6 +510,20 @@ void StackMaps::recordStackMapOpers(const MCSymbol &MILabel,
 
   // Record the stack size of the current function and update callsite count.
   const MachineFrameInfo &MFI = AP.MF->getFrameInfo();
+  //const MachineRegisterInfo &MRI = AP.MF->getRegInfo();
+  std::vector<CalleeSavedInfo> CSI = MFI.getCalleeSavedInfo();
+  //unsigned RBPNum  = MCRegisterInfo::getLLVMRegNum(6, false);
+  const TargetRegisterInfo *TRI = AP.MF->getSubtarget().getRegisterInfo();
+  const TargetFrameLowering *TFL = AP.MF->getSubtarget().getFrameLowering();
+  Register FReg = TRI->getFrameRegister(*(AP.MF));
+  HasFramePointer = TFL->hasFP(*(AP.MF));
+  //errs() << "Check RBP: " << MRI.isGeneralPurposeRegister(AP.MF, FReg);
+  if (CSRInfo.size() == 0) {
+    for (auto cs: CSI) {
+      CSR Entry = { cs.getReg(), cs.getFrameIdx() };
+      CSRInfo.push_back(Entry);
+    }
+  }
   const TargetRegisterInfo *RegInfo = AP.MF->getSubtarget().getRegisterInfo();
   bool HasDynamicFrameSize =
       MFI.hasVarSizedObjects() || RegInfo->hasStackRealignment(*(AP.MF));
@@ -704,6 +719,29 @@ void StackMaps::emitCallsiteEntries(MCStreamer &OS) {
   }
 }
 
+// Emit information about the function prologue: pushed frame pointer and
+// callee-saved registers.
+//
+// uint8  : HasFramePtr
+// uint8  : Padding
+// uint32 : NumSpills
+//
+// Spills[NumSpills] {
+//     uint16 : DwarfRegister
+// 	   uint16 : Padding
+// 	   int32  : Offset
+// }
+void StackMaps::emitCSRInfo(MCStreamer &OS) {
+  OS.emitInt8(HasFramePointer);
+  OS.emitInt8(0); // Padding
+  OS.emitInt32(CSRInfo.size());
+  for (auto &Ent : CSRInfo) {
+    OS.emitInt16(Ent.Reg);
+    OS.emitInt16(0); // Padding
+    OS.emitInt32(Ent.Offset);
+  }
+}
+
 /// Serialize the stackmap data.
 void StackMaps::serializeToStackMapSection() {
   (void)WSMP;
@@ -732,6 +770,7 @@ void StackMaps::serializeToStackMapSection() {
   emitFunctionFrameRecords(OS);
   emitConstantPoolEntries(OS);
   emitCallsiteEntries(OS);
+  emitCSRInfo(OS);
   OS.AddBlankLine();
 
   // Clean up.

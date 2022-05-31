@@ -144,6 +144,8 @@ class LivenessAnalysis {
 
 public:
   LivenessAnalysis(Function *Func) {
+    if (Func->empty())
+      return;
     // Compute defs and uses for each instruction.
     std::map<Instruction *, std::set<Value *>> Defs;
     std::map<Instruction *, std::set<Value *>> Uses;
@@ -304,24 +306,17 @@ public:
             ->getType();
 
     // Create the new control point, which is of the form:
-    //   bool new_control_point(YkMT*, YkLocation*, CtrlPointVars*,
-    //   ReturnValue*)
+    //   void* new_control_point(YkMT*, YkLocation*, CtrlPointVars*,
+    //   void*)
     // If the return type of the control point's caller is void (i.e. if a
     // function f calls yk_control_point and f's return type is void), create
     // an Int1 pointer as a dummy. We have to pass something as the yk_stopgap
     // signature expects a pointer, even if its never used.
-    Type *ReturnTy = Caller->getReturnType();
-    Type *ReturnPtrTy;
-    if (ReturnTy->isVoidTy()) {
-      // Create dummy pointer which we pass in but which is never written to.
-      ReturnPtrTy = Type::getInt1Ty(Context);
-    } else {
-      ReturnPtrTy = ReturnTy;
-    }
+    PointerType *Int8PtrTy = Type::getInt8Ty(Context)->getPointerTo(0);
     FunctionType *FType =
-        FunctionType::get(Type::getInt1Ty(Context),
+        FunctionType::get(Int8PtrTy,
                           {YkMTTy, YkLocTy, CtrlPointVarsTy->getPointerTo(),
-                           ReturnPtrTy->getPointerTo()},
+                           Int8PtrTy},
                           false);
     Function *NF = Function::Create(FType, GlobalVariable::ExternalLinkage,
                                     YK_NEW_CONTROL_POINT, M);
@@ -331,10 +326,6 @@ public:
     // struct by pointer.
     IRBuilder<> Builder(Caller->getEntryBlock().getFirstNonPHI());
     Value *InputStruct = Builder.CreateAlloca(CtrlPointVarsTy, 0, "");
-
-    // Also at the top, generate storage for the interpreted return of the
-    // control points caller.
-    Value *ReturnPtr = Builder.CreateAlloca(ReturnPtrTy, 0, "");
 
     Builder.SetInsertPoint(OldCtrlPointCall);
     unsigned LvIdx = 0;
@@ -347,11 +338,15 @@ public:
       LvIdx++;
     }
 
+    Function *FrameAddress = Intrinsic::getDeclaration(&M,
+        Intrinsic::frameaddress, {Int8PtrTy});
+    Value *FAddr = Builder.CreateCall(FrameAddress, {Builder.getInt32(0)});
+
     // Insert call to the new control point.
     Instruction *NewCtrlPointCallInst = Builder.CreateCall(
         NF, {OldCtrlPointCall->getArgOperand(YK_CONTROL_POINT_ARG_MT_IDX),
              OldCtrlPointCall->getArgOperand(YK_CONTROL_POINT_ARG_LOC_IDX),
-             InputStruct, ReturnPtr});
+             InputStruct, FAddr});
 
     // Once the control point returns we need to extract the (potentially
     // mutated) values from the returned YkCtrlPointStruct and reassign them to
@@ -380,14 +375,14 @@ public:
     // Create the new exit block.
     BasicBlock *ExitBB = BasicBlock::Create(Context, "", Caller);
     Builder.SetInsertPoint(ExitBB);
-    // YKFIXME: We need to return the value of interpreted return and the return
-    // type must be that of the control point's caller.
-    if (ReturnTy->isVoidTy()) {
-      Builder.CreateRetVoid();
-    } else {
-      Value *ReturnValue = Builder.CreateLoad(ReturnTy, ReturnPtr);
-      Builder.CreateRet(ReturnValue);
-    }
+
+    // Create call to frame reconstructor.
+    FunctionType *YKFRType =
+        FunctionType::get(Type::getVoidTy(Context), {Int8PtrTy}, false);
+    Function *YKFR = Function::Create(YKFRType, GlobalVariable::ExternalLinkage,
+                                    YK_RECONSTRUCT_FRAMES, M);
+    Builder.CreateCall(YKFR, {NewCtrlPointCallInst});
+    Builder.CreateUnreachable();
 
     // To do so we need to first split up the current block and then
     // insert a conditional branch that either continues or returns.
@@ -398,7 +393,59 @@ public:
     Instruction &OldBr = BB->back();
     OldBr.eraseFromParent();
     Builder.SetInsertPoint(BB);
-    Builder.CreateCondBr(NewCtrlPointCallInst, ExitBB, ContBB);
+    Value *HasGuardFailed = Builder.CreateICmpEQ(NewCtrlPointCallInst, ConstantPointerNull::get(Int8PtrTy));
+    // Go to exitBB, from where stack reconstruction is done and then jumps to
+    // where code needs to continue.
+    Builder.CreateCondBr(HasGuardFailed, ContBB, ExitBB);
+
+    // ====================== Insert stackmaps ========================= //
+    Intrinsic::ID SMFuncID = Function::lookupIntrinsicID("llvm.experimental.stackmap");
+    if (SMFuncID == Intrinsic::not_intrinsic) {
+      Context.emitError("can't find stackmap()");
+      return false;
+    }
+
+    Function *SMFunc = Intrinsic::getDeclaration(&M, SMFuncID);
+    std::map<Instruction *, std::set<Value *>> SMCalls;
+    for (Function &F: M) {
+      LivenessAnalysis LA(&F);
+      for (BasicBlock &BB: F) {
+        for (Instruction &I: BB) {
+          if ((isa<CallInst>(I)) || ((isa<BranchInst>(I)) && (cast<BranchInst>(I).isConditional())) || isa<SwitchInst>(I)) {
+            SMCalls.insert({&I, LA.getLiveVarsBefore(&I)});
+          }
+        }
+      }
+    }
+
+    uint64_t Count = 0;
+    uint64_t LiveCount = 0;
+    Value *Shadow = ConstantInt::get(Type::getInt32Ty(Context), 0);
+    for (auto It: SMCalls) {
+      Instruction *I = cast<Instruction>(It.first);
+      std::set<Value *> L = It.second;
+
+      IRBuilder<> Bldr(I);
+      Value *SMID = ConstantInt::get(Type::getInt64Ty(Context), Count);
+      std::vector<Value *> Args = {SMID, Shadow};
+      for (Value *A: L) {
+        Type *TheTy = A->getType();
+        //if ((TheTy != Type::getInt8Ty(Context)) &&
+        //  (TheTy != Type::getInt16Ty(Context)) &&
+        //  (TheTy != Type::getInt32Ty(Context)) &&
+        //  (TheTy != Type::getInt64Ty(Context)) &&
+        //  (TheTy != Type::getInt32PtrTy(Context))) {
+        //    errs() << "Skip:";
+        //    TheTy->dump();
+        //    continue;
+        //}
+        Args.push_back(A);
+        LiveCount++;
+      }
+      assert(SMFunc != nullptr);
+      Bldr.CreateCall(SMFunc->getFunctionType(), SMFunc, ArrayRef<Value *>(Args));
+      Count++;
+    }
 
 #ifndef NDEBUG
     // Our pass runs after LLVM normally does its verify pass. In debug builds
