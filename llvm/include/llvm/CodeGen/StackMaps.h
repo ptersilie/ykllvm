@@ -310,9 +310,11 @@ public:
   struct FunctionInfo {
     uint64_t StackSize = 0;
     uint64_t RecordCount = 1;
+    bool HasFramePointer;
+    CSRVec SpilledRegisters;
 
     FunctionInfo() = default;
-    explicit FunctionInfo(uint64_t StackSize) : StackSize(StackSize) {}
+    explicit FunctionInfo(uint64_t StackSize, bool HasFramePointer, CSRVec SpilledRegisters) : StackSize(StackSize), HasFramePointer(HasFramePointer), SpilledRegisters(SpilledRegisters) {}
   };
 
   struct CallsiteInfo {
@@ -364,7 +366,6 @@ private:
   ConstantPool ConstPool;
   FnInfoMap FnInfos;
   bool HasFramePointer;
-  CSRVec CSRInfo;
 
   MachineInstr::const_mop_iterator
   parseOperand(MachineInstr::const_mop_iterator MOI,

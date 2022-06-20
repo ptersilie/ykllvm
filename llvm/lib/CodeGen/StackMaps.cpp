@@ -511,19 +511,10 @@ void StackMaps::recordStackMapOpers(const MCSymbol &MILabel,
   // Record the stack size of the current function and update callsite count.
   const MachineFrameInfo &MFI = AP.MF->getFrameInfo();
   //const MachineRegisterInfo &MRI = AP.MF->getRegInfo();
-  std::vector<CalleeSavedInfo> CSI = MFI.getCalleeSavedInfo();
   //unsigned RBPNum  = MCRegisterInfo::getLLVMRegNum(6, false);
   const TargetRegisterInfo *TRI = AP.MF->getSubtarget().getRegisterInfo();
-  const TargetFrameLowering *TFL = AP.MF->getSubtarget().getFrameLowering();
-  Register FReg = TRI->getFrameRegister(*(AP.MF));
-  HasFramePointer = TFL->hasFP(*(AP.MF));
+  //Register FReg = TRI->getFrameRegister(*(AP.MF));
   //errs() << "Check RBP: " << MRI.isGeneralPurposeRegister(AP.MF, FReg);
-  if (CSRInfo.size() == 0) {
-    for (auto cs: CSI) {
-      CSR Entry = { cs.getReg(), cs.getFrameIdx() };
-      CSRInfo.push_back(Entry);
-    }
-  }
   const TargetRegisterInfo *RegInfo = AP.MF->getSubtarget().getRegisterInfo();
   bool HasDynamicFrameSize =
       MFI.hasVarSizedObjects() || RegInfo->hasStackRealignment(*(AP.MF));
@@ -532,8 +523,20 @@ void StackMaps::recordStackMapOpers(const MCSymbol &MILabel,
   auto CurrentIt = FnInfos.find(AP.CurrentFnSym);
   if (CurrentIt != FnInfos.end())
     CurrentIt->second.RecordCount++;
-  else
-    FnInfos.insert(std::make_pair(AP.CurrentFnSym, FunctionInfo(FrameSize)));
+  else {
+    // Collect callee-saved-register spills.
+    CSRVec CSRInfo;
+    std::vector<CalleeSavedInfo> CSI = MFI.getCalleeSavedInfo();
+    for (auto cs: CSI) {
+      int dwreg = getDwarfRegNum(cs.getReg(), TRI);
+      CSR Entry = { dwreg, cs.getFrameIdx() };
+      CSRInfo.push_back(Entry);
+    }
+    // Check whether this function pushed a frame pointer.
+    const TargetFrameLowering *TFL = AP.MF->getSubtarget().getFrameLowering();
+    bool HasFramePointer = TFL->hasFP(*(AP.MF));
+    FnInfos.insert(std::make_pair(AP.CurrentFnSym, FunctionInfo(FrameSize, HasFramePointer, CSRInfo)));
+  }
 }
 
 void StackMaps::recordStackMap(const MCSymbol &L, const MachineInstr &MI) {
@@ -721,24 +724,27 @@ void StackMaps::emitCallsiteEntries(MCStreamer &OS) {
 
 // Emit information about the function prologue: pushed frame pointer and
 // callee-saved registers.
+// CSRInfo[NumFunctions] {
+//     uint8  : HasFramePtr
+//     uint8  : Padding
+//     uint32 : NumSpills
 //
-// uint8  : HasFramePtr
-// uint8  : Padding
-// uint32 : NumSpills
-//
-// Spills[NumSpills] {
-//     uint16 : DwarfRegister
-// 	   uint16 : Padding
-// 	   int32  : Offset
+//     Spills[NumSpills] {
+//         uint16 : DwarfRegister
+//     	   uint16 : Padding
+//     	   int32  : Offset
+//     }
 // }
 void StackMaps::emitCSRInfo(MCStreamer &OS) {
-  OS.emitInt8(HasFramePointer);
-  OS.emitInt8(0); // Padding
-  OS.emitInt32(CSRInfo.size());
-  for (auto &Ent : CSRInfo) {
-    OS.emitInt16(Ent.Reg);
-    OS.emitInt16(0); // Padding
-    OS.emitInt32(Ent.Offset);
+  for (auto const &FR : FnInfos) {
+    OS.emitInt8(FR.second.HasFramePointer);
+    OS.emitInt8(0); // Padding
+    OS.emitInt32(FR.second.SpilledRegisters.size());
+    for (auto &Ent : FR.second.SpilledRegisters) {
+      OS.emitInt16(Ent.Reg);
+      OS.emitInt16(0); // Padding
+      OS.emitInt32(Ent.Offset);
+    }
   }
 }
 
