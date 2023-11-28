@@ -62,7 +62,13 @@ public:
             // emit a stackmap in those cases too.
             if (!CI.isIndirectCall() && CI.getCalledFunction()->isIntrinsic())
               continue;
-            SMCalls.insert({&I, LA.getLiveVarsBefore(&I)});
+            std::vector<Value *> Filtered;
+            for (Value *V : LA.getLiveVarsAfter(&I)) {
+              if (V != &CI) {
+                Filtered.push_back(V);
+              }
+            }
+            SMCalls.insert({&I, Filtered});
           } else if ((isa<BranchInst>(I) &&
                       cast<BranchInst>(I).isConditional()) ||
                      isa<SwitchInst>(I)) {

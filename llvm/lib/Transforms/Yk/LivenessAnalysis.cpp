@@ -112,10 +112,18 @@ LivenessAnalysis::LivenessAnalysis(Function *Func) {
         continue;
       }
 
-      for (auto *U = I.op_begin(); U < I.op_end(); U++)
+      for (auto *U = I.op_begin(); U < I.op_end(); U++) {
         if ((!isa<Constant>(U)) && (!isa<BasicBlock>(U)) &&
-            (!isa<MetadataAsValue>(U)) && (!isa<InlineAsm>(U)))
+            (!isa<MetadataAsValue>(U)) && (!isa<InlineAsm>(U))) {
           Uses[&I].insert(*U);
+        }
+        if (isa<GlobalVariable>(*U)) {
+          GlobalVariable *GV = cast<GlobalVariable>(*U);
+          if (GV->isThreadLocal()) {
+            Uses[&I].insert(*U);
+          }
+        }
+      }
     }
   }
 
@@ -190,6 +198,10 @@ std::vector<Value *> LivenessAnalysis::getLiveVarsBefore(Instruction *I) {
     return false;
   });
   return Sorted;
+}
+
+std::vector<Value *> LivenessAnalysis::getLiveVarsAfter(Instruction *I) {
+  return getLiveVarsBefore(I->getNextNode());
 }
 
 } // namespace llvm

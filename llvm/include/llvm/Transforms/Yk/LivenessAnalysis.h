@@ -35,6 +35,7 @@ public:
   /// Returns the vector of live variables immediately before the specified
   /// instruction (sorted in order of appearance).
   std::vector<Value *> getLiveVarsBefore(Instruction *I);
+  std::vector<Value *> getLiveVarsAfter(Instruction *I);
 };
 
 } // namespace llvm

@@ -150,6 +150,9 @@ public:
     // by JITted trace code (if a trace was executed).
     std::vector<Type *> TypeParams;
     for (Value *V : LiveVals) {
+      if (isa<GlobalVariable>(V)) {
+        continue;
+      }
       TypeParams.push_back(V->getType());
     }
     StructType *CtrlPointVarsTy =
@@ -182,6 +185,9 @@ public:
     Builder.SetInsertPoint(OldCtrlPointCall);
     unsigned LvIdx = 0;
     for (Value *LV : LiveVals) {
+      if (isa<GlobalVariable>(LV)) {
+        continue;
+      }
       Value *FieldPtr =
           Builder.CreateGEP(CtrlPointVarsTy, InputStruct,
                             {Builder.getInt32(0), Builder.getInt32(LvIdx)});

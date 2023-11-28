@@ -1161,6 +1161,8 @@ bool TargetPassConfig::addISelPasses() {
   if (YkLinkage) {
     addPass(createYkLinkagePass());
   }
+  if (TM->useEmulatedTLS())
+    addPass(createLowerEmuTLSPass());
 
   if (YkInsertStackMaps) {
     addPass(createYkStackmapsPass());
