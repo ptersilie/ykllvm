@@ -117,14 +117,14 @@ void processInstructions(
   for (const MachineInstr &Instr : MBB->instrs()) {
     // At each stackmap call, save the current mapping so it can later be
     // encoded in the stackmap when it is lowered.
-    errs() << "\nINSTR---------------------------------\n";
-    Instr.dump();
+    //errs() << "\nINSTR---------------------------------\n";
+    //Instr.dump();
     if (Instr.getOpcode() == TargetOpcode::STACKMAP) {
       for(auto Fart : SpillMap) {
-        if (Fart.second.size() > 2) {
-          errs() << "This has too many mappings: " << getDwarfRegNum(Fart.first) << "(" << Fart.second.size() << ")\n";
-          assert(false);
-        }
+        //if (Fart.second.size() > 2) {
+        //  errs() << "This has too many mappings: " << getDwarfRegNum(Fart.first) << "(" << Fart.second.size() << ")\n";
+        //  assert(false);
+        //}
       }
       StackmapSpillMaps[&Instr] = SpillMap;
       continue;
@@ -150,7 +150,7 @@ void processInstructions(
       auto RhsDwReg = getDwarfRegNum(Rhs.getReg());
       clearRhs(LhsDwReg, SpillMap);
       SpillMap[LhsDwReg] = {RhsDwReg};
-      errs() << "Reg2Reg " << LhsDwReg << " = " << RhsDwReg << "\n";
+      //errs() << "Reg2Reg " << LhsDwReg << " = " << RhsDwReg << "\n";
       // Transitively apply the mappings of `Rhs` to this mapping too.
       std::set<int64_t> Other = SpillMap[RhsDwReg];
       SpillMap[LhsDwReg].insert(Other.begin(), Other.end());
@@ -169,7 +169,7 @@ void processInstructions(
         const int64_t Offset = OffsetOp.getImm();
         clearRhs(DwReg, SpillMap);
         SpillMap[DwReg] = {Offset};
-        errs() << "Store " << DwReg << " = " << Offset << "\n";
+        //errs() << "Store " << DwReg << " = " << Offset << "\n";
       }
       continue;
     }
@@ -185,7 +185,7 @@ void processInstructions(
         const int64_t Offset = OffsetOp.getImm();
         clearRhs(DwReg, SpillMap);
         SpillMap[DwReg] = {Offset};
-        errs() << "Load " << DwReg << " = " << Offset << "\n";
+        //errs() << "Load " << DwReg << " = " << Offset << "\n";
       }
       continue;
     }
@@ -195,7 +195,7 @@ void processInstructions(
       // XXX? like what?
       assert(MO.isReg() && "Is register.");
       auto DwReg = getDwarfRegNum(MO.getReg());
-      errs() << "Unrelated other def: " << DwReg << "\n";
+      //errs() << "Unrelated other def: " << DwReg << "\n";
       SpillMap.erase(DwReg);
       clearRhs(DwReg, SpillMap);
     }
@@ -239,8 +239,6 @@ void findSpillLocations(
 /// runOnMachineFunction - Emit the function body.
 ///
 bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
-  MF.dump();
-
   TRI = MF.getSubtarget().getRegisterInfo();
   Subtarget = &MF.getSubtarget<X86Subtarget>();
 
