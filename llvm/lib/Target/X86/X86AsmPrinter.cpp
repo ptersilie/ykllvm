@@ -117,11 +117,12 @@ void processInstructions(
   for (const MachineInstr &Instr : MBB->instrs()) {
     // At each stackmap call, save the current mapping so it can later be
     // encoded in the stackmap when it is lowered.
+    errs() << "\nINSTR---------------------------------\n";
     Instr.dump();
     if (Instr.getOpcode() == TargetOpcode::STACKMAP) {
       for(auto Fart : SpillMap) {
         if (Fart.second.size() > 2) {
-          errs() << "This has too many mappings: " << getDwarfRegNum(Fart.first) << "\n";
+          errs() << "This has too many mappings: " << getDwarfRegNum(Fart.first) << "(" << Fart.second.size() << ")\n";
           assert(false);
         }
       }
@@ -145,12 +146,14 @@ void processInstructions(
       // and need to be removed. We need to do this before updating the
       // mapping, so the transitive property of the SpillMap isn't violated
       // (see `clearRhs` for more info).
-      clearRhs(Lhs.getReg(), SpillMap);
-      SpillMap[Lhs.getReg()] = {Rhs.getReg()};
-      errs() << "Reg2Reg " << getDwarfRegNum(Lhs.getReg()) << " = " << getDwarfRegNum(Rhs.getReg()) << "(" << Lhs.getReg() << ", " << Rhs.getReg() << ")\n";
+      auto LhsDwReg = getDwarfRegNum(Lhs.getReg());
+      auto RhsDwReg = getDwarfRegNum(Rhs.getReg());
+      clearRhs(LhsDwReg, SpillMap);
+      SpillMap[LhsDwReg] = {RhsDwReg};
+      errs() << "Reg2Reg " << LhsDwReg << " = " << RhsDwReg << "\n";
       // Transitively apply the mappings of `Rhs` to this mapping too.
-      std::set<int64_t> Other = SpillMap[Rhs.getReg()];
-      SpillMap[Lhs.getReg()].insert(Other.begin(), Other.end());
+      std::set<int64_t> Other = SpillMap[RhsDwReg];
+      SpillMap[LhsDwReg].insert(Other.begin(), Other.end());
       // YKFIXME: If the `mov` instruction has a killed-flag, remove the
       // register from the map.
       continue;
@@ -163,12 +166,12 @@ void processInstructions(
       const MachineOperand OffsetOp = Instr.getOperand(3);
       const MachineOperand MO = Instr.getOperand(5);
       assert(MO.isReg() && "Is register.");
-      const Register Reg = MO.getReg();
+      const Register DwReg = getDwarfRegNum(MO.getReg());
       if (OffsetOp.isImm()) {
         const int64_t Offset = OffsetOp.getImm();
-        clearRhs(Reg, SpillMap);
-        SpillMap[Reg] = {Offset};
-        errs() << "Store " << getDwarfRegNum(Reg) << " = " << Offset << "(" << Reg << ")\n";
+        clearRhs(DwReg, SpillMap);
+        SpillMap[DwReg] = {Offset};
+        errs() << "Store " << DwReg << " = " << Offset << "\n";
       }
       continue;
     }
@@ -179,24 +182,24 @@ void processInstructions(
       const MachineOperand OffsetOp = Instr.getOperand(4);
       const MachineOperand Lhs = Instr.getOperand(0);
       assert(Lhs.isReg() && "Is register.");
-      const Register Reg = Lhs.getReg();
+      const Register DwReg = getDwarfRegNum(Lhs.getReg());
       if (OffsetOp.isImm()) {
         const int64_t Offset = OffsetOp.getImm();
-        clearRhs(Reg, SpillMap);
-        SpillMap[Reg] = {Offset};
-        errs() << "Load " << getDwarfRegNum(Reg) << " = " << Offset << "(" << Reg << ")\n";
+        clearRhs(DwReg, SpillMap);
+        SpillMap[DwReg] = {Offset};
+        errs() << "Load " << DwReg << " = " << Offset << "\n";
       }
       continue;
     }
 
     // Any other assignments to tracked registers removes their mapping.
-    errs() << "OTHERS\n";
     for (const MachineOperand MO : Instr.defs()) {
       // XXX? like what?
       assert(MO.isReg() && "Is register.");
-      errs() << "   " << MO.getReg() << "\n";
-      SpillMap.erase(MO.getReg());
-      clearRhs(MO.getReg(), SpillMap);
+      auto DwReg = getDwarfRegNum(MO.getReg());
+      errs() << "Unrelated other def: " << DwReg << "\n";
+      SpillMap.erase(DwReg);
+      clearRhs(DwReg, SpillMap);
     }
   }
 }
