@@ -327,6 +327,10 @@ StackMaps::parseOperand(MachineInstr::const_mop_iterator MOI,
         auto Extras = SpillOffsets[R];
         // We currently can only deal with 2 additional locations. If there's
         // more than that, we have a problem.
+        // XXX check for each extra register if it is also live at this point
+        // (i.e. shows up in the stackmap (how?)). if so there's no need to
+        // track it here as well. hopefully this way we can reduce the amount
+        // back to <= 2.
         assert(Extras.size() <= 2);
         for (int64_t RHS : Extras) {
           if (RHS > 0) {
